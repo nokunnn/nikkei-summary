@@ -97,7 +97,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
         "その他": [...]
     }},
     "top_topics": [
-        {{"title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+        {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
     ]
 }}
 
@@ -111,7 +111,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=prompt
         )
         result_text = response.text
@@ -170,6 +170,7 @@ def fallback_categorize(articles: list[dict]) -> dict:
 
         if len(top_topics) < 5:
             top_topics.append({
+                "index": i + 1,
                 "title": title,
                 "summary": item["summary"],
                 "importance": 3,
@@ -179,7 +180,7 @@ def fallback_categorize(articles: list[dict]) -> dict:
     return {"categories": categories, "top_topics": top_topics}
 
 
-def send_line_notification(summary_data: dict, article_count: int, github_url: str = ""):
+def send_line_notification(summary_data: dict, articles: list[dict], article_count: int):
     """LINE Messaging APIで通知を送信"""
     log("LINE通知を送信中...")
 
@@ -206,10 +207,10 @@ def send_line_notification(summary_data: dict, article_count: int, github_url: s
         stars = "★" * topic.get("importance", 3)
         message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
         message_lines.append(f"   {stars}")
-
-    if github_url:
-        message_lines.append("")
-        message_lines.append(f"📄 詳細: {github_url}")
+        # 記事のリンクを追加
+        idx = topic.get("index", i) - 1
+        if 0 <= idx < len(articles):
+            message_lines.append(f"   {articles[idx]['link']}")
 
     message = "\n".join(message_lines)
 
@@ -343,13 +344,7 @@ def main():
         filepath = save_markdown(articles, summary_data)
 
         # 4. LINE通知
-        github_url = os.environ.get("GITHUB_SERVER_URL", "")
-        repo = os.environ.get("GITHUB_REPOSITORY", "")
-        if github_url and repo:
-            today = datetime.now().strftime("%Y-%m-%d")
-            github_url = f"{github_url}/{repo}/blob/main/summaries/{today}.md"
-
-        send_line_notification(summary_data, len(articles), github_url)
+        send_line_notification(summary_data, articles, len(articles))
 
         print()
         print("=" * 50)
