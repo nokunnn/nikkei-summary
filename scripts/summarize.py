@@ -11,13 +11,14 @@ import os
 import json
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
 from datetime import datetime
 from pathlib import Path
 
 
 # 定数
-RSS_URL = "https://www.nikkei.com/news/feed/"
+# RSS愛好会の日経新聞フィード（公式RSSは廃止済み）
+RSS_URL = "https://assets.wor.jp/rss/rdf/nikkei/news.rdf"
 MAX_ARTICLES = 30
 CATEGORIES = [
     "経済・景気",
@@ -42,7 +43,7 @@ def fetch_rss() -> list[dict]:
     log("RSSフィードを取得中...")
     try:
         feed = feedparser.parse(RSS_URL)
-        if feed.bozo:
+        if feed.bozo and not feed.entries:
             raise Exception(f"RSSパースエラー: {feed.bozo_exception}")
 
         articles = []
@@ -50,8 +51,8 @@ def fetch_rss() -> list[dict]:
             articles.append({
                 "title": entry.get("title", ""),
                 "link": entry.get("link", ""),
-                "published": entry.get("published", ""),
-                "summary": entry.get("summary", "")
+                "published": entry.get("published", entry.get("dc_date", "")),
+                "summary": entry.get("summary", entry.get("description", ""))
             })
 
         log(f"{len(articles)}件の記事を取得", "success")
@@ -69,12 +70,11 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
     if not api_key:
         raise ValueError("GOOGLE_API_KEY が設定されていません")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    client = genai.Client(api_key=api_key)
 
     # 記事リストを作成
     articles_text = "\n\n".join([
-        f"【記事{i+1}】\nタイトル: {a['title']}\n概要: {a['summary']}"
+        f"【記事{i+1}】\nタイトル: {a['title']}\n概要: {a['summary'] if a['summary'] else '(概要なし)'}"
         for i, a in enumerate(articles)
     ])
 
@@ -110,7 +110,10 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 """
 
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
         result_text = response.text
 
         # JSONを抽出（コードブロック対応）
