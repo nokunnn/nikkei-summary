@@ -2,8 +2,8 @@ name: Daily Nikkei Summary
 
 on:
   schedule:
-    # テスト用: 5分ごとに実行（確認後に元に戻す）
-    - cron: '*/5 * * * *'
+    # 毎日 UTC 22:00 (JST 7:00) に実行
+    - cron: '0 22 * * *'
   workflow_dispatch:
     # 手動実行も可能
 
