@@ -85,6 +85,10 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 
 【出力形式】
 {{
+    "daily_trend": {{
+        "summary": "本日のニュース全体を俯瞰した3-5行のトレンド分析。複数の記事に共通するテーマや、今日特に注目すべき動向をまとめる。",
+        "keywords": ["キーワード1", "キーワード2", "キーワード3"]
+    }},
     "categories": {{
         "経済・景気": [
             {{"index": 記事番号, "title": "タイトル", "summary": "2-3行の要約", "importance": 重要度1-5}}
@@ -102,11 +106,12 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 }}
 
 【指示】
-1. 各記事を最も適切な分野に分類してください
-2. 各記事について2-3行で要約してください
-3. 重要度は★の数(1-5)で評価してください（5が最重要）
-4. top_topicsには重要度の高い上位5件を選んでください
-5. JSONのみを出力し、他の説明は不要です
+1. daily_trendには、本日の記事全体を俯瞰し、複数の記事から読み取れるトレンドや共通テーマを分析してください
+2. 各記事を最も適切な分野に分類してください
+3. 各記事について2-3行で要約してください
+4. 重要度は★の数(1-5)で評価してください（5が最重要）
+5. top_topicsには重要度の高い上位5件を選んでください
+6. JSONのみを出力し、他の説明は不要です
 """
 
     try:
@@ -177,7 +182,13 @@ def fallback_categorize(articles: list[dict]) -> dict:
                 "category": matched_category
             })
 
-    return {"categories": categories, "top_topics": top_topics}
+    # フォールバック時のトレンド
+    daily_trend = {
+        "summary": "本日のニューストレンドは自動分析できませんでした。",
+        "keywords": []
+    }
+
+    return {"daily_trend": daily_trend, "categories": categories, "top_topics": top_topics}
 
 
 def send_line_notification(summary_data: dict, articles: list[dict], article_count: int):
@@ -194,11 +205,16 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
     # メッセージ作成
     today = datetime.now().strftime("%Y年%m月%d日")
     top_topics = summary_data.get("top_topics", [])
+    daily_trend = summary_data.get("daily_trend", {})
+    trend_summary = daily_trend.get("summary", "")
 
     message_lines = [
         f"📰 日経新聞 本日のサマリー",
         f"📅 {today}",
         f"📊 本日の記事数: {article_count}件",
+        "",
+        "📈 本日のトレンド:",
+        trend_summary,
         "",
         "🔥 注目トピック TOP5:"
     ]
@@ -246,6 +262,11 @@ def save_markdown(articles: list[dict], summary_data: dict) -> str:
     filename = today.strftime("%Y-%m-%d") + ".md"
     filepath = Path(__file__).parent.parent / "summaries" / filename
 
+    # トレンド情報を取得
+    daily_trend = summary_data.get("daily_trend", {})
+    trend_summary = daily_trend.get("summary", "")
+    trend_keywords = daily_trend.get("keywords", [])
+
     lines = [
         f"# 日経新聞サマリー - {today.strftime('%Y年%m月%d日')}",
         "",
@@ -254,9 +275,22 @@ def save_markdown(articles: list[dict], summary_data: dict) -> str:
         "",
         "---",
         "",
-        "## 🔥 注目トピック TOP5",
+        "## 📊 本日のトレンド",
+        "",
+        trend_summary,
         ""
     ]
+
+    if trend_keywords:
+        lines.append(f"**キーワード**: {', '.join(trend_keywords)}")
+        lines.append("")
+
+    lines.extend([
+        "---",
+        "",
+        "## 🔥 注目トピック TOP5",
+        ""
+    ])
 
     for i, topic in enumerate(summary_data.get("top_topics", [])[:5], 1):
         stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
