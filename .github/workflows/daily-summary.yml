@@ -2,8 +2,8 @@ name: Daily Nikkei Summary
 
 on:
   schedule:
-    # テスト用: 5分ごとに実行（本番では '0 22 * * *' に戻す）
-    - cron: '*/5 * * * *'
+    # テスト用: 15分ごとに実行（本番では '0 22 * * *' に戻す）
+    - cron: '*/15 * * * *'
   push:
     branches:
       - main
