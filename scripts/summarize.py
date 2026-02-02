@@ -11,6 +11,7 @@ import os
 import json
 import feedparser
 import requests
+import anthropic
 from google import genai
 from datetime import datetime
 from pathlib import Path
@@ -141,9 +142,94 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
     except json.JSONDecodeError as e:
         log(f"JSON解析エラー: {e}", "error")
         log(f"受信テキスト(先頭500文字): {result_text[:500] if result_text else 'empty'}", "error")
-        return fallback_categorize(articles)
+        return summarize_with_anthropic(articles)
     except Exception as e:
         log(f"Gemini API エラー: {e}", "error")
+        return summarize_with_anthropic(articles)
+
+
+def summarize_with_anthropic(articles: list[dict]) -> dict:
+    """Anthropic Claude APIで記事を要約・分類（Geminiのフォールバック）"""
+    log("Anthropic APIで要約・分類中（フォールバック）...")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        log("ANTHROPIC_API_KEY が設定されていません", "error")
+        return fallback_categorize(articles)
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # 記事リストを作成
+    articles_text = "\n\n".join([
+        f"【記事{i+1}】\nタイトル: {a['title']}\n概要: {a['summary'] if a['summary'] else '(概要なし)'}"
+        for i, a in enumerate(articles)
+    ])
+
+    prompt = f"""以下の日経新聞の記事を分析し、JSON形式で出力してください。
+
+【記事一覧】
+{articles_text}
+
+【出力形式】
+{{
+    "daily_trend": {{
+        "summary": "本日のニュース全体を俯瞰した3-5行のトレンド分析。複数の記事に共通するテーマや、今日特に注目すべき動向をまとめる。",
+        "keywords": ["キーワード1", "キーワード2", "キーワード3"]
+    }},
+    "categories": {{
+        "経済・景気": [
+            {{"index": 記事番号, "title": "タイトル", "summary": "2-3行の要約", "importance": 重要度1-5}}
+        ],
+        "政治・政策": [...],
+        "テクノロジー・DX": [...],
+        "国際情勢": [...],
+        "企業・産業": [...],
+        "金融・市場": [...],
+        "その他": [...]
+    }},
+    "top_topics": [
+        {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+    ]
+}}
+
+【指示】
+1. daily_trendには、本日の記事全体を俯瞰し、複数の記事から読み取れるトレンドや共通テーマを分析してください
+2. 各記事を最も適切な分野に分類してください
+3. 各記事について2-3行で要約してください
+4. 重要度は★の数(1-5)で評価してください（5が最重要）
+5. top_topicsには重要度の高い上位5件を選んでください
+6. JSONのみを出力し、他の説明は不要です"""
+
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        result_text = response.content[0].text
+
+        # JSONを抽出（コードブロック対応）
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0]
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0]
+
+        result = json.loads(result_text.strip())
+
+        # daily_trendがない場合はデフォルト値を設定
+        if "daily_trend" not in result:
+            result["daily_trend"] = {
+                "summary": "トレンド分析は取得できませんでした。",
+                "keywords": []
+            }
+
+        log("要約・分類完了（Anthropic）", "success")
+        return result
+    except json.JSONDecodeError as e:
+        log(f"JSON解析エラー（Anthropic）: {e}", "error")
+        return fallback_categorize(articles)
+    except Exception as e:
+        log(f"Anthropic API エラー: {e}", "error")
         return fallback_categorize(articles)
 
 
