@@ -2,8 +2,13 @@ name: Daily Nikkei Summary
 
 on:
   schedule:
-    # 毎日 UTC 22:00 (JST 7:00) に実行
-    - cron: '0 22 * * *'
+    # テスト用: 5分ごとに実行（本番では '0 22 * * *' に戻す）
+    - cron: '*/5 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/daily-summary.yml'
   workflow_dispatch:
     # 手動実行も可能
 
