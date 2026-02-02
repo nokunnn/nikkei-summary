@@ -116,7 +116,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 
     try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt
         )
         result_text = response.text
@@ -128,10 +128,19 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
             result_text = result_text.split("```")[1].split("```")[0]
 
         result = json.loads(result_text.strip())
+
+        # daily_trendがない場合はデフォルト値を設定
+        if "daily_trend" not in result:
+            result["daily_trend"] = {
+                "summary": "トレンド分析は取得できませんでした。",
+                "keywords": []
+            }
+
         log("要約・分類完了", "success")
         return result
     except json.JSONDecodeError as e:
         log(f"JSON解析エラー: {e}", "error")
+        log(f"受信テキスト(先頭500文字): {result_text[:500] if result_text else 'empty'}", "error")
         return fallback_categorize(articles)
     except Exception as e:
         log(f"Gemini API エラー: {e}", "error")
