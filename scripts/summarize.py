@@ -15,6 +15,7 @@ import anthropic
 from google import genai
 from datetime import datetime
 from pathlib import Path
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
 # 定数
@@ -61,6 +62,20 @@ def fetch_rss() -> list[dict]:
     except Exception as e:
         log(f"RSS取得失敗: {e}", "error")
         raise
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True
+)
+def generate_content_with_retry(client, model, prompt):
+    """Gemini API呼び出し（リトライ付き）"""
+    return client.models.generate_content(
+        model=model,
+        contents=prompt
+    )
 
 
 def summarize_with_gemini(articles: list[dict]) -> dict:
@@ -116,9 +131,10 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 """
 
     try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash-8b",
-            contents=prompt
+        response = generate_content_with_retry(
+            client,
+            "gemini-3.0-flash",
+            prompt
         )
         result_text = response.text
 
