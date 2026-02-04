@@ -133,7 +133,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
     try:
         response = generate_content_with_retry(
             client,
-            "gemini-3.0-flash",
+            "gemini-3-flash-preview",
             prompt
         )
         result_text = response.text
@@ -153,7 +153,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
                 "keywords": []
             }
 
-        result["model"] = "Gemini 3.0 Flash"
+        result["model"] = "Gemini 3 Flash"
         log("要約・分類完了", "success")
         return result
     except json.JSONDecodeError as e:
