@@ -117,7 +117,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash-8b",
             contents=prompt
         )
         result_text = response.text
@@ -203,7 +203,7 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
     try:
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}]
         )
         result_text = response.content[0].text
@@ -214,7 +214,11 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
         elif "```" in result_text:
             result_text = result_text.split("```")[1].split("```")[0]
 
-        result = json.loads(result_text.strip())
+        # 制御文字を除去（JSON解析エラー対策）
+        import re
+        result_text = re.sub(r'[\x00-\x1f\x7f]', '', result_text.strip())
+
+        result = json.loads(result_text)
 
         # daily_trendがない場合はデフォルト値を設定
         if "daily_trend" not in result:
@@ -227,6 +231,7 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
         return result
     except json.JSONDecodeError as e:
         log(f"JSON解析エラー（Anthropic）: {e}", "error")
+        log(f"受信テキスト(先頭1000文字): {result_text[:1000] if result_text else 'empty'}", "error")
         return fallback_categorize(articles)
     except Exception as e:
         log(f"Anthropic API エラー: {e}", "error")
