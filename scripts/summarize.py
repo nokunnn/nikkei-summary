@@ -153,6 +153,7 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
                 "keywords": []
             }
 
+        result["model"] = "Gemini 3.0 Flash"
         log("要約・分類完了", "success")
         return result
     except json.JSONDecodeError as e:
@@ -243,6 +244,7 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
                 "keywords": []
             }
 
+        result["model"] = "Claude Sonnet 4"
         log("要約・分類完了（Anthropic）", "success")
         return result
     except json.JSONDecodeError as e:
@@ -304,7 +306,7 @@ def fallback_categorize(articles: list[dict]) -> dict:
         "keywords": []
     }
 
-    return {"daily_trend": daily_trend, "categories": categories, "top_topics": top_topics}
+    return {"daily_trend": daily_trend, "categories": categories, "top_topics": top_topics, "model": "キーワードベース"}
 
 
 def send_line_notification(summary_data: dict, articles: list[dict], article_count: int):
@@ -323,11 +325,15 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
     top_topics = summary_data.get("top_topics", [])
     daily_trend = summary_data.get("daily_trend", {})
     trend_summary = daily_trend.get("summary", "")
+    model_name = summary_data.get("model", "不明")
 
     message_lines = [
+        "おはようございます！",
+        "",
         f"📰 日経新聞 本日のサマリー",
         f"📅 {today}",
         f"📊 本日の記事数: {article_count}件",
+        f"🤖 使用モデル: {model_name}",
         "",
         "📈 本日のトレンド:",
         trend_summary,
