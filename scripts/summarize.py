@@ -309,7 +309,128 @@ def fallback_categorize(articles: list[dict]) -> dict:
     return {"daily_trend": daily_trend, "categories": categories, "top_topics": top_topics, "model": "キーワードベース"}
 
 
-def send_line_notification(summary_data: dict, articles: list[dict], article_count: int):
+CATEGORIES_EN = {
+    "経済・景気": "Economy",
+    "政治・政策": "Politics & Policy",
+    "テクノロジー・DX": "Technology & DX",
+    "国際情勢": "International Affairs",
+    "企業・産業": "Business & Industry",
+    "金融・市場": "Finance & Markets",
+    "その他": "Other"
+}
+
+
+def translate_with_gemini(summary_data: dict) -> dict:
+    """Gemini APIで要約データを英語に翻訳"""
+    log("Gemini APIで英語翻訳中...")
+
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("GOOGLE_API_KEY が設定されていません")
+
+    client = genai.Client(api_key=api_key)
+
+    # modelキーを除外してJSON化
+    data_to_translate = {k: v for k, v in summary_data.items() if k != "model"}
+    json_text = json.dumps(data_to_translate, ensure_ascii=False, indent=2)
+
+    prompt = f"""Translate the following Japanese news summary JSON into English.
+Translate all text values (summary, title, keywords, category names) into natural English.
+Keep the JSON structure exactly the same. Output only valid JSON.
+
+Category name mapping:
+- 経済・景気 → Economy
+- 政治・政策 → Politics & Policy
+- テクノロジー・DX → Technology & DX
+- 国際情勢 → International Affairs
+- 企業・産業 → Business & Industry
+- 金融・市場 → Finance & Markets
+- その他 → Other
+
+{json_text}"""
+
+    try:
+        response = generate_content_with_retry(
+            client,
+            "gemini-3-flash-preview",
+            prompt
+        )
+        result_text = response.text
+
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0]
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0]
+
+        result = json.loads(result_text.strip())
+        result["model"] = summary_data.get("model", "")
+        log("英語翻訳完了（Gemini）", "success")
+        return result
+    except Exception as e:
+        log(f"Gemini翻訳エラー: {e}", "error")
+        return translate_with_anthropic(summary_data)
+
+
+def translate_with_anthropic(summary_data: dict) -> dict:
+    """Anthropic APIで要約データを英語に翻訳（フォールバック）"""
+    log("Anthropic APIで英語翻訳中（フォールバック）...")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        log("ANTHROPIC_API_KEY が設定されていません", "error")
+        return summary_data
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    data_to_translate = {k: v for k, v in summary_data.items() if k != "model"}
+    json_text = json.dumps(data_to_translate, ensure_ascii=False, indent=2)
+
+    prompt = f"""Translate the following Japanese news summary JSON into English.
+Translate all text values (summary, title, keywords, category names) into natural English.
+Keep the JSON structure exactly the same. Output only valid JSON.
+
+Category name mapping:
+- 経済・景気 → Economy
+- 政治・政策 → Politics & Policy
+- テクノロジー・DX → Technology & DX
+- 国際情勢 → International Affairs
+- 企業・産業 → Business & Industry
+- 金融・市場 → Finance & Markets
+- その他 → Other
+
+{json_text}"""
+
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        result_text = response.content[0].text
+
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0]
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0]
+
+        import re
+        result_text = re.sub(r'[\x00-\x1f\x7f]', '', result_text.strip())
+
+        result = json.loads(result_text)
+        result["model"] = summary_data.get("model", "")
+        log("英語翻訳完了（Anthropic）", "success")
+        return result
+    except Exception as e:
+        log(f"Anthropic翻訳エラー: {e}", "error")
+        return summary_data
+
+
+def translate_to_english(summary_data: dict) -> dict:
+    """要約データを英語に翻訳（Gemini優先、Anthropicフォールバック）"""
+    return translate_with_gemini(summary_data)
+
+
+def send_line_notification(summary_data: dict, articles: list[dict], article_count: int, summary_data_en: dict = None):
     """LINE Messaging APIで通知を送信"""
     log("LINE通知を送信中...")
 
@@ -349,6 +470,27 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
         idx = topic.get("index", i) - 1
         if 0 <= idx < len(articles):
             message_lines.append(f"   {articles[idx]['link']}")
+
+    # 英語版サマリーを追加
+    if summary_data_en:
+        top_topics_en = summary_data_en.get("top_topics", [])
+        daily_trend_en = summary_data_en.get("daily_trend", {})
+        trend_summary_en = daily_trend_en.get("summary", "")
+
+        message_lines.extend([
+            "",
+            "--- English Summary ---",
+            "",
+            "Today's Trend:",
+            trend_summary_en,
+            "",
+            "Top 5 Topics:"
+        ])
+
+        for i, topic in enumerate(top_topics_en[:5], 1):
+            stars = "★" * topic.get("importance", 3)
+            message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
+            message_lines.append(f"   {stars}")
 
     message = "\n".join(message_lines)
 
@@ -456,6 +598,86 @@ def save_markdown(articles: list[dict], summary_data: dict) -> str:
     return str(filepath)
 
 
+def save_markdown_en(articles: list[dict], summary_data_en: dict) -> str:
+    """英語版Markdown形式で保存"""
+    log("英語版Markdown保存中...")
+
+    today = datetime.now()
+    filename = today.strftime("%Y-%m-%d") + ".md"
+    filepath = Path(__file__).parent.parent / "summaries_en" / filename
+
+    daily_trend = summary_data_en.get("daily_trend", {})
+    trend_summary = daily_trend.get("summary", "")
+    trend_keywords = daily_trend.get("keywords", [])
+
+    lines = [
+        f"# Nikkei News Summary - {today.strftime('%B %d, %Y')}",
+        "",
+        f"**Generated at**: {today.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"**Articles**: {len(articles)}",
+        "",
+        "---",
+        "",
+        "## Today's Trends",
+        "",
+        trend_summary,
+        ""
+    ]
+
+    if trend_keywords:
+        lines.append(f"**Keywords**: {', '.join(trend_keywords)}")
+        lines.append("")
+
+    lines.extend([
+        "---",
+        "",
+        "## Top 5 Topics",
+        ""
+    ])
+
+    for i, topic in enumerate(summary_data_en.get("top_topics", [])[:5], 1):
+        stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
+        lines.append(f"### {i}. {topic.get('title', '')}")
+        lines.append(f"**Category**: {topic.get('category', '')} | **Importance**: {stars}")
+        lines.append(f"> {topic.get('summary', '')}")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("## Summary by Category")
+    lines.append("")
+
+    categories = summary_data_en.get("categories", {})
+    for category_ja in CATEGORIES:
+        category_en = CATEGORIES_EN.get(category_ja, category_ja)
+        # 翻訳後のデータでは英語カテゴリ名で格納されている可能性があるため両方チェック
+        items = categories.get(category_en, categories.get(category_ja, []))
+        if items:
+            lines.append(f"### {category_en}")
+            lines.append("")
+            for item in items:
+                stars = "★" * item.get("importance", 3)
+                lines.append(f"- **{item.get('title', '')}** {stars}")
+                lines.append(f"  - {item.get('summary', '')}")
+            lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("## All Articles")
+    lines.append("")
+
+    for i, article in enumerate(articles, 1):
+        lines.append(f"{i}. [{article['title']}]({article['link']})")
+
+    content = "\n".join(lines)
+
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    filepath.write_text(content, encoding="utf-8")
+
+    log(f"英語版保存完了: {filepath}", "success")
+    return str(filepath)
+
+
 def send_error_notification(error_message: str):
     """エラー時のLINE通知"""
     channel_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -493,14 +715,20 @@ def main():
         # 1. RSS取得
         articles = fetch_rss()
 
-        # 2. Gemini APIで要約
+        # 2. Gemini APIで日本語要約
         summary_data = summarize_with_gemini(articles)
 
-        # 3. Markdown保存
+        # 3. 英語翻訳
+        summary_data_en = translate_to_english(summary_data)
+
+        # 4. 日本語Markdown保存
         filepath = save_markdown(articles, summary_data)
 
-        # 4. LINE通知
-        send_line_notification(summary_data, articles, len(articles))
+        # 5. 英語Markdown保存
+        filepath_en = save_markdown_en(articles, summary_data_en)
+
+        # 6. LINE通知（日本語+英語）
+        send_line_notification(summary_data, articles, len(articles), summary_data_en)
 
         print()
         print("=" * 50)

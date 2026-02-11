@@ -44,6 +44,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add summaries/
+          git add summaries/ summaries_en/
           git diff --staged --quiet || git commit -m "Add summary for $(date +%Y-%m-%d)"
           git push
