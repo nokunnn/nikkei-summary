@@ -20,8 +20,13 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 # 定数
 # RSS愛好会の日経新聞フィード（公式RSSは廃止済み）
-RSS_URL = "https://assets.wor.jp/rss/rdf/nikkei/news.rdf"
-MAX_ARTICLES = 30
+RSS_URLS = [
+    "https://assets.wor.jp/rss/rdf/nikkei/news.rdf",       # 総合ニュース
+    "https://assets.wor.jp/rss/rdf/nikkei/technology.rdf", # テクノロジー
+    "https://assets.wor.jp/rss/rdf/nikkei/business.rdf",   # ビジネス
+    "https://assets.wor.jp/rss/rdf/nikkei/economy.rdf",    # 経済
+]
+MAX_ARTICLES = 60  # 複数フィード合算・重複除去後の上限
 CATEGORIES = [
     "経済・景気",
     "政治・政策",
@@ -41,27 +46,37 @@ def log(message: str, status: str = "info"):
 
 
 def fetch_rss() -> list[dict]:
-    """RSSフィードから記事を取得"""
+    """複数RSSフィードから記事を取得（重複除去）"""
     log("RSSフィードを取得中...")
-    try:
-        feed = feedparser.parse(RSS_URL)
-        if feed.bozo and not feed.entries:
-            raise Exception(f"RSSパースエラー: {feed.bozo_exception}")
+    seen_links = set()
+    articles = []
 
-        articles = []
-        for entry in feed.entries[:MAX_ARTICLES]:
-            articles.append({
-                "title": entry.get("title", ""),
-                "link": entry.get("link", ""),
-                "published": entry.get("published", entry.get("dc_date", "")),
-                "summary": entry.get("summary", entry.get("description", ""))
-            })
+    for url in RSS_URLS:
+        try:
+            feed = feedparser.parse(url)
+            if feed.bozo and not feed.entries:
+                log(f"RSSパースエラー ({url}): {feed.bozo_exception}", "error")
+                continue
+            for entry in feed.entries:
+                link = entry.get("link", "")
+                if link in seen_links:
+                    continue
+                seen_links.add(link)
+                articles.append({
+                    "title": entry.get("title", ""),
+                    "link": link,
+                    "published": entry.get("published", entry.get("dc_date", "")),
+                    "summary": entry.get("summary", entry.get("description", ""))
+                })
+        except Exception as e:
+            log(f"RSS取得失敗 ({url}): {e}", "error")
 
-        log(f"{len(articles)}件の記事を取得", "success")
-        return articles
-    except Exception as e:
-        log(f"RSS取得失敗: {e}", "error")
-        raise
+    if not articles:
+        raise Exception("全フィードの取得に失敗しました")
+
+    articles = articles[:MAX_ARTICLES]
+    log(f"{len(articles)}件の記事を取得（重複除去済み）", "success")
+    return articles
 
 
 @retry(
