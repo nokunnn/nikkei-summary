@@ -116,9 +116,14 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
         "金融・市場": [...],
         "その他": [...]
     }},
-    "top_topics": [
-        {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
-    ]
+    "top_topics": {{
+        "social": [
+            {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+        ],
+        "personal": [
+            {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+        ]
+    }}
 }}
 
 【指示】
@@ -126,7 +131,9 @@ def summarize_with_gemini(articles: list[dict]) -> dict:
 2. 各記事を最も適切な分野に分類してください
 3. 各記事について2-3行で要約してください
 4. 重要度は★の数(1-5)で評価してください（5が最重要）
-5. top_topicsには重要度の高い上位5件を選んでください
+5. top_topicsは以下の2グループに分けて選んでください：
+   - social（社会的に重要なニュース）: 経済・景気・政治・政策・文化・社会に関連するニュースから重要度の高い3件を選んでください
+   - personal（個人に特化した重要なニュース）: AI・データサイエンス・コンサルティング・航空業界・交通業界に関連するニュースから重要度の高い3件を選んでください。該当するニュースがない場合は、テクノロジー・DXや企業・産業から代替として選んでください
 6. JSONのみを出力し、他の説明は不要です
 """
 
@@ -204,9 +211,14 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
         "金融・市場": [...],
         "その他": [...]
     }},
-    "top_topics": [
-        {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
-    ]
+    "top_topics": {{
+        "social": [
+            {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+        ],
+        "personal": [
+            {{"index": 記事番号, "title": "タイトル", "summary": "要約", "importance": 重要度, "category": "分野"}}
+        ]
+    }}
 }}
 
 【指示】
@@ -214,7 +226,9 @@ def summarize_with_anthropic(articles: list[dict]) -> dict:
 2. 各記事を最も適切な分野に分類してください
 3. 各記事について2-3行で要約してください
 4. 重要度は★の数(1-5)で評価してください（5が最重要）
-5. top_topicsには重要度の高い上位5件を選んでください
+5. top_topicsは以下の2グループに分けて選んでください：
+   - social（社会的に重要なニュース）: 経済・景気・政治・政策・文化・社会に関連するニュースから重要度の高い3件を選んでください
+   - personal（個人に特化した重要なニュース）: AI・データサイエンス・コンサルティング・航空業界・交通業界に関連するニュースから重要度の高い3件を選んでください。該当するニュースがない場合は、テクノロジー・DXや企業・産業から代替として選んでください
 6. JSONのみを出力し、他の説明は不要です"""
 
     try:
@@ -269,8 +283,11 @@ def fallback_categorize(articles: list[dict]) -> dict:
         "金融・市場": ["株価", "為替", "日銀", "金利", "投資", "債券", "円安", "円高"]
     }
 
+    personal_keywords = ["AI", "人工知能", "データ", "コンサルティング", "コンサル", "航空", "交通", "空港", "鉄道", "物流"]
+
     categories = {cat: [] for cat in CATEGORIES}
-    top_topics = []
+    social_topics = []
+    personal_topics = []
 
     for i, article in enumerate(articles):
         title = article["title"]
@@ -291,14 +308,34 @@ def fallback_categorize(articles: list[dict]) -> dict:
         }
         categories[matched_category].append(item)
 
-        if len(top_topics) < 5:
-            top_topics.append({
-                "index": i + 1,
-                "title": title,
-                "summary": item["summary"],
-                "importance": 3,
-                "category": matched_category
-            })
+        topic = {
+            "index": i + 1,
+            "title": title,
+            "summary": item["summary"],
+            "importance": 3,
+            "category": matched_category
+        }
+
+        if any(word in text for word in personal_keywords) and len(personal_topics) < 3:
+            personal_topics.append(topic)
+        elif matched_category in ("経済・景気", "政治・政策", "その他") and len(social_topics) < 3:
+            social_topics.append(topic)
+
+    # 不足分を補完
+    for i, article in enumerate(articles):
+        if len(social_topics) >= 3 and len(personal_topics) >= 2:
+            break
+        topic = {
+            "index": i + 1,
+            "title": article["title"],
+            "summary": article.get("summary", "")[:100],
+            "importance": 3,
+            "category": "その他"
+        }
+        if len(social_topics) < 3 and topic not in social_topics:
+            social_topics.append(topic)
+        elif len(personal_topics) < 2 and topic not in personal_topics:
+            personal_topics.append(topic)
 
     # フォールバック時のトレンド
     daily_trend = {
@@ -306,7 +343,7 @@ def fallback_categorize(articles: list[dict]) -> dict:
         "keywords": []
     }
 
-    return {"daily_trend": daily_trend, "categories": categories, "top_topics": top_topics, "model": "キーワードベース"}
+    return {"daily_trend": daily_trend, "categories": categories, "top_topics": {"social": social_topics[:3], "personal": personal_topics[:3]}, "model": "キーワードベース"}
 
 
 CATEGORIES_EN = {
@@ -443,7 +480,9 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
 
     # メッセージ作成
     today = datetime.now().strftime("%Y年%m月%d日")
-    top_topics = summary_data.get("top_topics", [])
+    top_topics = summary_data.get("top_topics", {})
+    social_topics = top_topics.get("social", []) if isinstance(top_topics, dict) else top_topics[:3]
+    personal_topics = top_topics.get("personal", []) if isinstance(top_topics, dict) else top_topics[3:5]
     daily_trend = summary_data.get("daily_trend", {})
     trend_summary = daily_trend.get("summary", "")
     model_name = summary_data.get("model", "不明")
@@ -459,21 +498,32 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
         "📈 本日のトレンド:",
         trend_summary,
         "",
-        "🔥 注目トピック TOP5:"
+        "🌏 社会的に重要なニュース:"
     ]
 
-    for i, topic in enumerate(top_topics[:5], 1):
+    for i, topic in enumerate(social_topics[:3], 1):
         stars = "★" * topic.get("importance", 3)
         message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
         message_lines.append(f"   {stars}")
-        # 記事のリンクを追加
+        idx = topic.get("index", i) - 1
+        if 0 <= idx < len(articles):
+            message_lines.append(f"   {articles[idx]['link']}")
+
+    message_lines.extend(["", "👤 個人に特化した重要なニュース:"])
+
+    for i, topic in enumerate(personal_topics[:3], 1):
+        stars = "★" * topic.get("importance", 3)
+        message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
+        message_lines.append(f"   {stars}")
         idx = topic.get("index", i) - 1
         if 0 <= idx < len(articles):
             message_lines.append(f"   {articles[idx]['link']}")
 
     # 英語版サマリーを追加
     if summary_data_en:
-        top_topics_en = summary_data_en.get("top_topics", [])
+        top_topics_en = summary_data_en.get("top_topics", {})
+        social_topics_en = top_topics_en.get("social", []) if isinstance(top_topics_en, dict) else top_topics_en[:3]
+        personal_topics_en = top_topics_en.get("personal", []) if isinstance(top_topics_en, dict) else top_topics_en[3:5]
         daily_trend_en = summary_data_en.get("daily_trend", {})
         trend_summary_en = daily_trend_en.get("summary", "")
 
@@ -484,10 +534,17 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
             "Today's Trend:",
             trend_summary_en,
             "",
-            "Top 5 Topics:"
+            "🌏 Socially Important News:"
         ])
 
-        for i, topic in enumerate(top_topics_en[:5], 1):
+        for i, topic in enumerate(social_topics_en[:3], 1):
+            stars = "★" * topic.get("importance", 3)
+            message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
+            message_lines.append(f"   {stars}")
+
+        message_lines.extend(["", "👤 Personally Relevant News:"])
+
+        for i, topic in enumerate(personal_topics_en[:3], 1):
             stars = "★" * topic.get("importance", 3)
             message_lines.append(f"{i}. [{topic.get('category', '')}] {topic.get('title', '')}")
             message_lines.append(f"   {stars}")
@@ -552,13 +609,26 @@ def save_markdown(articles: list[dict], summary_data: dict) -> str:
     lines.extend([
         "---",
         "",
-        "## 🔥 注目トピック TOP5",
+        "## 🔥 注目トピック",
         ""
     ])
 
-    for i, topic in enumerate(summary_data.get("top_topics", [])[:5], 1):
+    top_topics = summary_data.get("top_topics", {})
+    social_topics = top_topics.get("social", []) if isinstance(top_topics, dict) else top_topics[:3]
+    personal_topics = top_topics.get("personal", []) if isinstance(top_topics, dict) else top_topics[3:5]
+
+    lines.extend(["### 🌏 社会的に重要なニュース", ""])
+    for i, topic in enumerate(social_topics[:3], 1):
         stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
-        lines.append(f"### {i}. {topic.get('title', '')}")
+        lines.append(f"#### {i}. {topic.get('title', '')}")
+        lines.append(f"**分野**: {topic.get('category', '')} | **重要度**: {stars}")
+        lines.append(f"> {topic.get('summary', '')}")
+        lines.append("")
+
+    lines.extend(["### 👤 個人に特化した重要なニュース", ""])
+    for i, topic in enumerate(personal_topics[:3], 1):
+        stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
+        lines.append(f"#### {i}. {topic.get('title', '')}")
         lines.append(f"**分野**: {topic.get('category', '')} | **重要度**: {stars}")
         lines.append(f"> {topic.get('summary', '')}")
         lines.append("")
@@ -631,13 +701,26 @@ def save_markdown_en(articles: list[dict], summary_data_en: dict) -> str:
     lines.extend([
         "---",
         "",
-        "## Top 5 Topics",
+        "## Top Topics",
         ""
     ])
 
-    for i, topic in enumerate(summary_data_en.get("top_topics", [])[:5], 1):
+    top_topics_en = summary_data_en.get("top_topics", {})
+    social_topics_en = top_topics_en.get("social", []) if isinstance(top_topics_en, dict) else top_topics_en[:3]
+    personal_topics_en = top_topics_en.get("personal", []) if isinstance(top_topics_en, dict) else top_topics_en[3:5]
+
+    lines.extend(["### 🌏 Socially Important News", ""])
+    for i, topic in enumerate(social_topics_en[:3], 1):
         stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
-        lines.append(f"### {i}. {topic.get('title', '')}")
+        lines.append(f"#### {i}. {topic.get('title', '')}")
+        lines.append(f"**Category**: {topic.get('category', '')} | **Importance**: {stars}")
+        lines.append(f"> {topic.get('summary', '')}")
+        lines.append("")
+
+    lines.extend(["### 👤 Personally Relevant News", ""])
+    for i, topic in enumerate(personal_topics_en[:3], 1):
+        stars = "★" * topic.get("importance", 3) + "☆" * (5 - topic.get("importance", 3))
+        lines.append(f"#### {i}. {topic.get('title', '')}")
         lines.append(f"**Category**: {topic.get('category', '')} | **Importance**: {stars}")
         lines.append(f"> {topic.get('summary', '')}")
         lines.append("")
