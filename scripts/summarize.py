@@ -13,7 +13,9 @@ import feedparser
 import requests
 import anthropic
 from google import genai
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 from pathlib import Path
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -494,7 +496,7 @@ def send_line_notification(summary_data: dict, articles: list[dict], article_cou
         return False
 
     # メッセージ作成
-    today = datetime.now().strftime("%Y年%m月%d日")
+    today = datetime.now(JST).strftime("%Y年%m月%d日")
     top_topics = summary_data.get("top_topics", {})
     social_topics = top_topics.get("social", []) if isinstance(top_topics, dict) else top_topics[:3]
     personal_topics = top_topics.get("personal", []) if isinstance(top_topics, dict) else top_topics[3:5]
@@ -594,7 +596,7 @@ def save_markdown(articles: list[dict], summary_data: dict) -> str:
     """Markdown形式で保存"""
     log("Markdown保存中...")
 
-    today = datetime.now()
+    today = datetime.now(JST)
     filename = today.strftime("%Y-%m-%d") + ".md"
     filepath = Path(__file__).parent.parent / "summaries" / filename
 
@@ -687,7 +689,7 @@ def save_markdown_en(articles: list[dict], summary_data_en: dict) -> str:
     """英語版Markdown形式で保存"""
     log("英語版Markdown保存中...")
 
-    today = datetime.now()
+    today = datetime.now(JST)
     filename = today.strftime("%Y-%m-%d") + ".md"
     filepath = Path(__file__).parent.parent / "summaries_en" / filename
 
